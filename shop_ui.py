@@ -1,4 +1,6 @@
-import json
+import json, os
+from pathlib import Path
+from typing import Optional, Set
 from dotenv import load_dotenv
 import discord
 from discord import app_commands
@@ -64,41 +66,95 @@ class ConfigModal(Modal, title="Configure Shop Item"):
         super().__init__()
         self._view = view
 
-    async def on_submit(self, interaction: discord.Interaction):
+ async def on_submit(self, interaction: discord.Interaction):
         v = self._view
         async with v.pool.acquire() as con:
-            lib = await con.fetchrow("select * from shop_item_library where id=$1", v.selected_item_library_id)
-            cat_id = lib["category_id"]
-            name = lib["name"]
-            bp = lib["blueprint_path"]
+            if v.kind == "single":
+                # use DB helper instead of raw SQL
+                lib = await find_item_library(con, v.selected_item_library_id)
+                cat_id = lib["category_id"]
+                name = lib["name"]
+                bp = lib["blueprint_path"]
 
-            # parse modal inputs
-            price = int(str(self.price))
-            qty = int(str(self.quantity)) if str(self.quantity) else 1
-            qual = int(str(self.quality)) if str(self.quality) else None
-            is_bp = str(self.is_blueprint).strip().lower() in ("true", "yes", "1", "y")
-            limit = int(str(self.buy_limit)) if str(self.buy_limit) else None
+                price = int(self.price.value)
+                qty = int(self.quantity.value or 1)
+                qual = int(self.quality.value) if self.quality.value else None
+                is_bp = str(self.is_blueprint.value).strip().lower() in ("true", "yes", "1", "y")
+                limit = int(self.buy_limit.value) if self.buy_limit.value else None
 
-            await create_shop_item(con, v.selected_item_library_id, cat_id, name, bp, price, qty, qual, is_bp, limit)
+                await create_shop_item(
+                    con,
+                    v.selected_item_library_id,
+                    cat_id, name, bp,
+                    price, qty, qual, is_bp, limit
+                )
 
-        await interaction.response.edit_message(
-            content=f"✅ Added **{name}** to the shop (price {price}, qty {qty}).",
-            view=None
+                msg = f"✅ Added **{name}** to the shop (price {price}, qty {qty})."
+
+            else:  # kind == "kit"
+                # prefer a DB helper (see snippet below) to avoid driver-specific SQL
+                kit = await get_kit_by_id(con, v.selected_kit_id)  # add to db.py
+                price = int(self.price.value)
+                qty = int(self.quantity.value or 1)
+                limit = int(self.buy_limit.value) if self.buy_limit.value else None
+
+                await create_shop_item_kit(
+                    con,
+                    kit_id=v.selected_kit_id,
+                    name=kit["name"],
+                    price=price,
+                    quantity=qty,
+                    buy_limit=limit
+                )
+                msg = f"✅ Added **{kit['name']}** (kit) to the shop (price {price}, qty {qty})."
+
+        await interaction.response.edit_message(content=msg, view=None)
+     
+class KindSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="What are you adding?",
+            options=[
+                discord.SelectOption(label="Single item", value="single"),
+                discord.SelectOption(label="Kit", value="kit"),
+            ],
+            min_values=1, max_values=1,
         )
-
+    async def callback(self, interaction: discord.Interaction):
+        v: ShopAddView = self.view
+        v.kind = self.values[0]
+        if v.kind == "single":
+            await v.start_category_flow(interaction)
+        else:
+            await v.start_kit_flow(interaction)
+            
 class ShopAddView(View):
     def __init__(self, pool, timeout=300):
         super().__init__(timeout=timeout)
         self.pool = pool
+        self.kind = "single"
+        self.selected_kit_id = None
         self.selected_category_id = None
         self.selected_item_library_id = None
 
-    async def start(self, interaction: discord.Interaction):
+ async def start(self, interaction: discord.Interaction):
+        self.clear_items()
+        self.add_item(KindSelect())
+        await interaction.response.send_message("Add to shop:", view=self, ephemeral=True)
+
+    async def start_category_flow(self, interaction: discord.Interaction):
         async with self.pool.acquire() as con:
             cats = await search_categories(con, q="", limit=25)
         self.clear_items()
         self.add_item(CategorySelect(cats))
-        await interaction.response.send_message("Select a category:", view=self, ephemeral=True)
+        await interaction.response.edit_message(content="Select a category:", view=self)
+
+    async def start_kit_flow(self, interaction: discord.Interaction):
+        async with self.pool.acquire() as con:
+            kits = await con.fetch("select id, name from shop_kit where active=1 order by name limit 25")
+        self.clear_items()
+        self.add_item(KitSelect(kits))  
+        await interaction.response.edit_message(content="Choose a kit:", view=self)
 
     async def show_items(self, interaction: discord.Interaction, page=0):
         limit = 25
@@ -112,3 +168,13 @@ class ShopAddView(View):
 
     async def open_config_modal(self, interaction: discord.Interaction):
         await interaction.response.send_modal(ConfigModal(self))
+        
+class KitSelect(discord.ui.Select):
+    def __init__(self, kits):
+        options = [discord.SelectOption(label=k["name"], value=str(k["id"])) for k in kits]
+        super().__init__(placeholder="Kit…", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        v: ShopAddView = self.view
+        v.selected_kit_id = int(self.values[0])
+        await v.open_config_modal(interaction)
