@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Happy Halloween!",
+    "type": "event",
+    "target": "Halloween2025",
+    "amount": 20
+  },
+  {
+    "name": "Supporter",
+    "type": "role",
+    "target": "Put role id here",
+    "amount": 25
+  }
+]
