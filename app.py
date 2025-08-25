@@ -14,15 +14,15 @@ from seed_loader import seed_from_json, seed_from_csv
 from shop_ui import ShopAddView, is_shop_admin
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=False)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL)
 log = logging.getLogger("wrecksshop")
 
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
-if not DISCORD_TOKEN:
-    raise RuntimeError("Missing DISCORD_TOKEN env var")
+DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
+DATABASE_URL = os.environ.get("DATABASE_URL")
+REWARD_POINTS = int(os.environ["REWARD_POINTS"]
 
 # ---------- FastAPI (health) ----------
 app = FastAPI()
