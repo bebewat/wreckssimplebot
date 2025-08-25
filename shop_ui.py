@@ -67,39 +67,37 @@ class ConfigModal(Modal, title="Configure Shop Item"):
         self._view = view
 
  async def on_submit(self, interaction: discord.Interaction):
-        v = self._view
-        async with v.pool.acquire() as con:
-            if v.kind == "single":
-                # use DB helper instead of raw SQL
-                lib = await find_item_library(con, v.selected_item_library_id)
-                cat_id = lib["category_id"]
-                name = lib["name"]
-                bp = lib["blueprint_path"]
+    v = self._view
+    async with v.pool.acquire() as conn:
+        if v.kind == "single":
+            lib = await find_item_library(conn, v.selected_item_library_id)
+            cat_id = lib["category_id"]
+            name = lib["name"]
+            bp = lib["blueprint_path"]
 
-                price = int(self.price.value)
-                qty = int(self.quantity.value or 1)
-                qual = int(self.quality.value) if self.quality.value else None
-                is_bp = str(self.is_blueprint.value).strip().lower() in ("true", "yes", "1", "y")
-                limit = int(self.buy_limit.value) if self.buy_limit.value else None
+            price = int(self.price.value)
+            qty = int(self.quantity.value or 1)
+            qual = int(self.quality.value) if self.quality.value else None
+            is_bp = str(self.is_blueprint.value).strip().lower() in ("true", "yes", "1", "y")
+            limit = int(self.buy_limit.value) if self.buy_limit.value else None
 
-                await create_shop_item(
-                    con,
-                    v.selected_item_library_id,
-                    cat_id, name, bp,
-                    price, qty, qual, is_bp, limit
-                )
-
+            await create_shop_item(
+                conn,
+                v.selected_item_library_id,
+                cat_id, name, bp,
+                price, qty, qual, is_bp, limit
+            )
                 msg = f"✅ Added **{name}** to the shop (price {price}, qty {qty})."
 
-            else:  # kind == "kit"
-                # prefer a DB helper (see snippet below) to avoid driver-specific SQL
-                kit = await get_kit_by_id(con, v.selected_kit_id)  # add to db.py
+            else:  
+                
+                kit = await get_kit_by_id(conn, v.selected_kit_id)  
                 price = int(self.price.value)
                 qty = int(self.quantity.value or 1)
                 limit = int(self.buy_limit.value) if self.buy_limit.value else None
 
                 await create_shop_item_kit(
-                    con,
+                    conn,
                     kit_id=v.selected_kit_id,
                     name=kit["name"],
                     price=price,
@@ -143,14 +141,14 @@ class ShopAddView(View):
         await interaction.response.send_message("Add to shop:", view=self, ephemeral=True)
 
     async def start_category_flow(self, interaction: discord.Interaction):
-        async with self.pool.acquire() as con:
-            cats = await search_categories(con, q="", limit=25)
+        async with self.pool.acquire() as conn:
+            cats = await search_categories(conn, q="", limit=25)
         self.clear_items()
         self.add_item(CategorySelect(cats))
         await interaction.response.edit_message(content="Select a category:", view=self)
 
     async def start_kit_flow(self, interaction: discord.Interaction):
-        async with self.pool.acquire() as con:
+        async with self.pool.acquire() as conn:
             kits = await con.fetch("select id, name from shop_kit where active=1 order by name limit 25")
         self.clear_items()
         self.add_item(KitSelect(kits))  
@@ -159,8 +157,8 @@ class ShopAddView(View):
     async def show_items(self, interaction: discord.Interaction, page=0):
         limit = 25
         offset = page * limit
-        async with self.pool.acquire() as con:
-            items = await list_items_by_category(con, self.selected_category_id, limit=limit, offset=offset)
+        async with self.pool.acquire() as conn:
+            items = await list_items_by_category(conn, self.selected_category_id, limit=limit, offset=offset)
         self.clear_items()
         self.add_item(ItemSelect(items))
 
