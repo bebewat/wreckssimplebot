@@ -7,15 +7,17 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import View, Select, Button, Modal, TextInput
 
-from db import get_pool, list_items_by_category, search_categories, find_item_library, create_shop_item
+from db import (
+    search_categories,
+    list_items_by_category,
+    find_item_library,
+    create_shop_item,
+    get_kit_by_id,
+    create_shop_item_kit,
+    list_kits,  
+)
 
 load_dotenv()
-
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", 0))
-SHOP_CHANNEL = int(os.getenv("SHOP_CHANNEL", 0))
-REWARD_INTERVAL_MINUTES = int(os.getenv("REWARD_INTERVAL_MINUTES", 30))
-REWARD_POINTS = int(os.getenv("REWARD_POINTS", 10))
 
 ADMIN_ROLE_PATH = Path(__file__).parent / 'admin_roles.json'
 DISCOUNTS_PATH = Path(__file__).parent / 'discounts.json'
@@ -72,7 +74,7 @@ class ConfigModal(Modal):
     def __init__(self, view: "ShopAddView"):
         super().__init__(title="Configure Shop Item")
         self._view = view
-        
+
         self.price = TextInput(label="Price (points)", placeholder="e.g., 100", required=True)
         self.quantity = TextInput(label="Quantity", placeholder="e.g., 1", required=True, default="1")
         self.quality = TextInput(label="Quality (optional)", required=False, placeholder="e.g., 100")
@@ -118,8 +120,8 @@ class ConfigModal(Modal):
                 )
                 msg = f"✅ Added **{name}** to the shop (price {price}, qty {qty})."
 
-        else:  
-                kit = await list_kits(con)
+            else:  # v.kind == "kit"
+                kit = await get_kit_by_id(con, v.selected_kit_id)
                 if not kit:
                     await interaction.response.edit_message(content="Kit not found.", view=None)
                     return
