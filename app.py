@@ -22,7 +22,7 @@ log = logging.getLogger("wrecksshop")
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 DATABASE_URL = os.environ.get("DATABASE_URL")
-REWARD_POINTS = int(os.environ["REWARD_POINTS"]
+REWARD_POINTS = int(os.environ["REWARD_POINTS"])
 
 # ---------- FastAPI (health) ----------
 app = FastAPI()
