@@ -1,0 +1,14 @@
+{
+  "Armor": [
+    {
+      "name": "Hide Shirt",
+      "blueprint_path": "/Game/PrimalEarth/CoreBlueprints/Items/Armor/Leather/PrimalItemArmor_HideShirt.PrimalItemArmor_HideShirt"
+    }
+  ],
+  "Weapons": [
+    {
+      "name": "Metal Pike",
+      "blueprint_path": "/Game/PrimalEarth/CoreBlueprints/Weapons/PrimalItem_WeaponPike.PrimalItem_WeaponPike"
+    }
+  ]
+}
