@@ -44,25 +44,6 @@ async def ping_cmd(interaction: discord_Interaction):
   message="Custom thanks here",
   anonymous="Send anonymously (still logged internally)"
 )
-async def thankyou_cmd(
-  interaction: discord.Interaction,
-  member: discord.Member,
-  message: str,
-  anonymous: bool = False
-):
-  author = Interaction.user
-  if anonymous:
-    display = f"Someone says: {message}"
-  else:
-    display = f"{author.mention} says: {message}"
-  try: 
-    await member.send(f"You received a thank you on {interaction.guild.name}:\n{display}")
-  except: Exception:
-    await interaction.response.send_message(
-      f"Could you DM {member.mention}. Posting here:\n{display}"
-    )
-    return
-  await interaction.response.send_message("Delivered!", ephemeral=True)
 
 class ShopCog(commands.Cog):
   def __init__(self, bot: commands.Bot, pool):
