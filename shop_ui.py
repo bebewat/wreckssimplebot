@@ -66,20 +66,20 @@ class ConfigModal(Modal, title="Configure Shop Item"):
         super().__init__()
         self._view = view
 
- async def on_submit(self, interaction: discord.Interaction):
-    v = self._view
-    async with v.pool.acquire() as conn:
-        if v.kind == "single":
-            lib = await find_item_library(conn, v.selected_item_library_id)
-            cat_id = lib["category_id"]
-            name = lib["name"]
-            bp = lib["blueprint_path"]
+     async def on_submit(self, interaction: discord.Interaction):
+        v = self._view
+        async with v.pool.acquire() as conn:
+            if v.kind == "single":
+                lib = await find_item_library(conn, v.selected_item_library_id)
+                cat_id = lib["category_id"]
+                name = lib["name"]
+                bp = lib["blueprint_path"]
 
-            price = int(self.price.value)
-            qty = int(self.quantity.value or 1)
-            qual = int(self.quality.value) if self.quality.value else None
-            is_bp = str(self.is_blueprint.value).strip().lower() in ("true", "yes", "1", "y")
-            limit = int(self.buy_limit.value) if self.buy_limit.value else None
+                price = int(self.price.value)
+                qty = int(self.quantity.value or 1)
+                qual = int(self.quality.value) if self.quality.value else None
+                is_bp = str(self.is_blueprint.value).strip().lower() in ("true", "yes", "1", "y")
+                limit = int(self.buy_limit.value) if self.buy_limit.value else None
 
             await create_shop_item(
                 conn,
