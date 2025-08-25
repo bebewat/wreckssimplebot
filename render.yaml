@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: wreckssimplebot
+    env: python
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: RCON_SERVERS
+        sync: false
+      - key: REWARD_INTERVAL_MINUTES
+        sync: false
+      - key: REWARD_POINTS
+        sync: false
+      - key: SHOP_LOG_CHANNEL_ID
+        sync: false
