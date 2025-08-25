@@ -74,19 +74,36 @@ class ShopCog(commands.Cog):
     view = ShopAddView(self.pool)
     await view.start(interaction)
 
-@app_commands.command(name="shop-remove", description="Remove a shop item by name")
-@app_commands.describe(name="Item name to remove")
-@is_shop_admin()
-async def shop_remove(self, interaction: discord.Interaction, name: str):
+  @app_commands.command(name="shop-remove", description="Remove a shop item by name")
+  @app_commands.describe(name="Item name to remove")
+  @is_shop_admin()
+  async def shop_remove(self, interaction: discord.Interaction, name: str):
   async with self.pool.acquire() as con:
     row = await con.fetchrow("Delete from shop_item where name=$1 returning name", name)
     if row: await interaction.response.send_message(f" Removed **{row['name']}**.", ephemeral=True)
 
-@app_commands.command(name="shop-sync-seed", description="Import categories from CSV/JSON")
+  @app_commands.command(name="shop-sync-seed", description="Import categories from CSV/JSON")
+  @is_shop_admin()
+  async def shop_sync_seed(self, interaction: discord.Interaction, source_type: str, path: str):
+    async with self.pool.acquire() as con:
+      if source_type.lower() == "json":
+        await seed_from_json(con, path)
+      elif source_type.lower() == "csv":
+        await seed_from_csv(con, path)
+      else:
+        await interaction.response.send_message("Use source type of 'json' or 'csv'.", ephemeral=True)
+        return
+    await ineraction.response.send_message("Seed sync complete.", ephemeral=True)
+
+async def setup_shop(bot: commands.Bot):
+  pool = await get_pool()
+  await init_db(pool)
+  await bot.add_cog(ShopCog(bot, pool))
 
 @bot.event
 async def on_ready():
   try: 
+    await setup_shop(bot)
     await bot.tree.sync()
     log.info("App commands synced. Logged in as %s (%s)", bot.user, bot.user.id)
 except Exception as e:
