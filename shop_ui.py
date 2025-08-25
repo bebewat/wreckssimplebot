@@ -23,17 +23,30 @@ DISCOUNTS_PATH = Path(__file__).parent / 'discounts.json'
 admin_roles = json.loads(ADMIN_ROLE_PATH.read_text()) if ADMIN_ROLE_PATH.exists() else []
 discounts = json.loads(DISCOUNTS_PATH.read_text()) if DISCOUNTS_PATH.exists() else []
 
+def _admin_role_ids() -> Set[str]:
+    try:
+        return {str(r["id"]) for r in admin_roles}
+    except Exception:
+        return set()
+        
 def is_shop_admin():
-    return any(r['id'] == str(user_id) for r in admin_roles)
+    """Shop Admin Roles"""
+    allowed = _admin_role_ids()
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.user.guild_permissions.administrator:
+            return True
+        user_role_ids = {str(r.id) for r in getattr(interaction.user, "roles", [])}
+        return bool(allowed & user_role_ids)
+    return app_commands.check(predicate)
 
-def apply_discounts(user_roles, base_price, current_event=None):
-    price = base_price
+def apply_discounts(user_roles: Set[str], base_price: int, current_event: Optional[str] = None) -> int:
+    price = float(base_price)
     for d in discounts:
-        if d['type'] == 'role' and d['target'] in user_roles:
-            price = price * (1 - d['amount']/100)
-        if d['type'] == 'event' and d['target'] == current_event:
-            price = price * (1 - d['amount']/100)
-    return int(price)
+        if d.get("type") == "role" and d.get("target") in user_roles:
+            price *= (1.0 - float(d.get("amount", 0)) / 100.0)
+        if d.get("type") == "event" and d.get("target") == current_event:
+            price *= (1.0 - float(d.get("amount", 0)) / 100.0)
+    return int(round(price))
 
 class CategorySelect(Select):
     def __init__(self, categories):
@@ -41,7 +54,7 @@ class CategorySelect(Select):
         super().__init__(placeholder="Choose a category…", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction):
-        view: ShopAddView = self.view  # type: ignore
+        view: "ShopAddView" = self.view  
         view.selected_category_id = int(self.values[0])
         await view.show_items(interaction)
 
@@ -66,45 +79,45 @@ class ConfigModal(Modal, title="Configure Shop Item"):
         super().__init__()
         self._view = view
 
-     async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
         v = self._view
         async with v.pool.acquire() as conn:
-            if v.kind == "single":
-                lib = await find_item_library(conn, v.selected_item_library_id)
-                cat_id = lib["category_id"]
-                name = lib["name"]
-                bp = lib["blueprint_path"]
+        if v.kind == "single":
+            lib = await find_item_library(conn, v.selected_item_library_id)
+            cat_id = lib["category_id"]
+            name = lib["name"]
+            bp = lib["blueprint_path"]
 
-                price = int(self.price.value)
-                qty = int(self.quantity.value or 1)
-                qual = int(self.quality.value) if self.quality.value else None
-                is_bp = str(self.is_blueprint.value).strip().lower() in ("true", "yes", "1", "y")
-                limit = int(self.buy_limit.value) if self.buy_limit.value else None
+            price = int(self.price.value)
+            qty = int(self.quantity.value or 1)
+            qual = int(self.quality.value) if self.quality.value else None
+            is_bp = str(self.is_blueprint.value).strip().lower() in ("true", "yes", "1", "y")
+            limit = int(self.buy_limit.value) if self.buy_limit.value else None
 
-            await create_shop_item(
-                conn,
-                v.selected_item_library_id,
-                cat_id, name, bp,
-                price, qty, qual, is_bp, limit
-            )
-                msg = f"✅ Added **{name}** to the shop (price {price}, qty {qty})."
+        await create_shop_item(
+            conn,
+            v.selected_item_library_id,
+            cat_id, name, bp,
+            price, qty, qual, is_bp, limit
+        )
+            msg = f"✅ Added **{name}** to the shop (price {price}, qty {qty})."
 
-            else:  
+        else:  
                 
-                kit = await get_kit_by_id(conn, v.selected_kit_id)  
-                price = int(self.price.value)
-                qty = int(self.quantity.value or 1)
-                limit = int(self.buy_limit.value) if self.buy_limit.value else None
+            kit = await get_kit_by_id(conn, v.selected_kit_id)  
+            price = int(self.price.value)
+            qty = int(self.quantity.value or 1)
+            limit = int(self.buy_limit.value) if self.buy_limit.value else None
 
-                await create_shop_item_kit(
-                    conn,
-                    kit_id=v.selected_kit_id,
-                    name=kit["name"],
-                    price=price,
-                    quantity=qty,
-                    buy_limit=limit
-                )
-                msg = f"✅ Added **{kit['name']}** (kit) to the shop (price {price}, qty {qty})."
+            await create_shop_item_kit(
+                conn,
+                kit_id=v.selected_kit_id,
+                name=kit["name"],
+                price=price,
+                quantity=qty,
+                buy_limit=limit
+            )
+            msg = f"✅ Added **{kit['name']}** (kit) to the shop (price {price}, qty {qty})."
 
         await interaction.response.edit_message(content=msg, view=None)
      
@@ -135,7 +148,7 @@ class ShopAddView(View):
         self.selected_category_id = None
         self.selected_item_library_id = None
 
- async def start(self, interaction: discord.Interaction):
+    async def start(self, interaction: discord.Interaction):
         self.clear_items()
         self.add_item(KindSelect())
         await interaction.response.send_message("Add to shop:", view=self, ephemeral=True)
