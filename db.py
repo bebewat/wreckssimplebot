@@ -1,3 +1,5 @@
+# db.py — MySQL/MariaDB version using aiomysql
+
 import os
 from urllib.parse import urlparse, unquote
 from typing import Optional, Iterable, List, Dict, Any
@@ -6,117 +8,45 @@ import aiomysql
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-async def get_pool():
-    return await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+# ------------------------- Pool -------------------------
 
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS shop_category (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  name VARCHAR(191) NOT NULL,
-  PRIMARY KEY (id),
-  UNIQUE KEY uq_shop_category_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+_pool: Optional[aiomysql.Pool] = None
 
-CREATE TABLE IF NOT EXISTS shop_item_library (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  category_id BIGINT UNSIGNED NOT NULL,
-  name VARCHAR(191) NOT NULL,
-  blueprint_path TEXT,
-  PRIMARY KEY (id),
-  UNIQUE KEY uq_cat_name (category_id, name),
-  CONSTRAINT fk_itemlib_category
-    FOREIGN KEY (category_id) REFERENCES shop_category(id)
-    ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+def _parse_mysql_url(url: str) -> Dict[str, Any]:
+    u = urlparse(url)
+    if u.scheme not in ("mysql", "mariadb"):
+        raise RuntimeError("DATABASE_URL must start with mysql:// or mariadb://")
+    return {
+        "host": u.hostname or "localhost",
+        "port": u.port or 3306,
+        "user": unquote(u.username or ""),
+        "password": unquote(u.password or ""),
+        "db": (u.path or "/").lstrip("/") or None,
+    }
 
-CREATE TABLE IF NOT EXISTS `shop_user` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `discord_id` BIGINT UNSIGNED UNIQUE,
-  `eos_id` VARCHAR(64) UNIQUE,
-  `steam_id` BIGINT UNSIGNED UNIQUE,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+async def get_pool() -> aiomysql.Pool:
+    global _pool
+    if _pool is None:
+        cfg = _parse_mysql_url(DATABASE_URL)
+        _pool = await aiomysql.create_pool(
+            minsize=1,
+            maxsize=5,
+            autocommit=True,
+            charset="utf8mb4",
+            cursorclass=aiomysql.DictCursor,
+            **cfg,
+        )
+    return _pool
 
-CREATE TABLE IF NOT EXISTS `shop_item` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `library_id` BIGINT UNSIGNED,
-  `category_id` BIGINT UNSIGNED,
-  `name` VARCHAR(191) NOT NULL,
-  `blueprint_path` TEXT,
-  `price` INT UNSIGNED NOT NULL,
-  `quantity` INT UNSIGNED NOT NULL DEFAULT 1,
-  `quality` INT UNSIGNED NULL,
-  `is_blueprint` BOOLEAN DEFAULT FALSE,
-  `kind` ENUM('single','kit') NOT NULL DEFAULT 'single',
-  `kit_id` INT UNSIGNED NULL,
-  `buy_limit` INT UNSIGNED NULL,
-  `active` BOOLEAN DEFAULT TRUE,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_shop_item_active` (`active`),
-  KEY `idx_shop_item_category` (`category_id`),
-  KEY `idx_shop_item_library` (`library_id`),
-  KEY `idx_shop_item_kind` (`kind`),
-  KEY `idx_shop_item_kit` (`kit_id`),
-  CONSTRAINT `fk_shop_item_category`
-    FOREIGN KEY (`category_id`) REFERENCES `shop_category`(`id`)
-    ON DELETE SET NULL,
-  CONSTRAINT `fk_shop_item_library`
-    FOREIGN KEY (`library_id`) REFERENCES `shop_item_library`(`id`)
-    ON DELETE SET NULL
-  CONSTRAINT `fk_shop_item_kit`
-    FOREIGN KEY (`kit_id`) REFERENCES `shop_kit`(`id`)
-    ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+# If you need to create tables here, put DDL in this function.
+async def init_db(pool: aiomysql.Pool) -> None:
+    # No-op by default (you already created your core tables).
+    # Keep here so app startup doesn’t break.
+    return
 
-CREATE TABLE IF NOT EXISTS `shop_purchase` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` BIGINT UNSIGNED NOT NULL,
-  `item_id` BIGINT UNSIGNED NOT NULL,
-  `price_paid` INT UNSIGNED NOT NULL,
-  `quantity` INT UNSIGNED NOT NULL DEFAULT 1,
-  `map` VARCHAR(64) NULL,
-  `status` ENUM('queued','delivered','failed','cancelled') NOT NULL DEFAULT 'queued',
-  `queued_by_user_id` BIGINT UNSIGNED NULL,
-  `queued_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `delivered_at` TIMESTAMP NULL DEFAULT NULL,
-  `external_ref` VARCHAR(191) NULL,   -- e.g., ArkShop/Tip4Serv/RCON receipt
-  PRIMARY KEY (`id`),
-  KEY `idx_purchase_user` (`user_id`),
-  KEY `idx_purchase_item` (`item_id`),
-  KEY `idx_purchase_status` (`status`),
-  CONSTRAINT `fk_purchase_user`
-    FOREIGN KEY (`user_id`) REFERENCES `shop_user`(`id`)
-    ON DELETE RESTRICT,
-  CONSTRAINT `fk_purchase_item`
-    FOREIGN KEY (`item_id`) REFERENCES `shop_item`(`id`)
-    ON DELETE RESTRICT,
-  CONSTRAINT `fk_purchase_queued_by`
-    FOREIGN KEY (`queued_by_user_id`) REFERENCES `shop_user`(`id`)
-    ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+# ------------------------- Helpers -------------------------
 
-CREATE TABLE IF NOT EXISTS `shop_points_ledger` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` BIGINT UNSIGNED NOT NULL,
-  `delta` INT NOT NULL,                
-  `reason` VARCHAR(191) NULL,
-  `ref` VARCHAR(191) NULL,         
-  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_points_user_time` (`user_id`, `created_at`),
-  CONSTRAINT `fk_points_user`
-    FOREIGN KEY (`user_id`) REFERENCES `shop_user`(`id`)
-    ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-"""
-
-async def init_db(pool):
-    async with pool.acquire() as con:
-        await con.execute(SCHEMA_SQL)
+# Categories
 
 async def upsert_category(conn: aiomysql.Connection, name: str) -> int:
     """
@@ -130,7 +60,9 @@ async def upsert_category(conn: aiomysql.Connection, name: str) -> int:
     """
     async with conn.cursor() as cur:
         await cur.execute(sql, (name.strip(),))
-        return cur.lastrowid
+        return cur.lastrowid  # works for insert or existing due to LAST_INSERT_ID trick
+
+# Library items
 
 async def upsert_library_item(
     conn: aiomysql.Connection,
@@ -210,6 +142,8 @@ async def autocomplete_items(
         await cur.execute(sql, (pattern, int(limit)))
         return await cur.fetchall()
 
+# Shop items (live)
+
 async def create_shop_item(
     conn: aiomysql.Connection,
     library_id: int,
@@ -249,6 +183,7 @@ async def create_shop_item(
             ),
         )
 
+# Kits
 
 async def get_kit_by_id(conn: aiomysql.Connection, kit_id: int) -> Optional[Dict[str, Any]]:
     sql = "SELECT id, name FROM shop_kit WHERE id = %s"
@@ -278,8 +213,3 @@ async def create_shop_item_kit(
             sql,
             (kit_id, name, int(price), int(quantity), (int(buy_limit) if buy_limit is not None else None)),
         )
-async def list_kits(conn):
-    sql = "SELECT id, name FROM shop_kit WHERE active=1 ORDER BY name LIMIT 25"
-    async with conn.cursor() as cur:
-        await cur.execute(sql)
-        return await cur.fetchall()
