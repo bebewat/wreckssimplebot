@@ -4,3 +4,4 @@ aiomysql==0.2.0
 fastapi==0.112.2
 uvicorn==0.30.6
 requests==2.32.4
+audioop-lts>=0.2.1
