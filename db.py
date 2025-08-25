@@ -175,7 +175,7 @@ async def autocomplete_items(con, q: str, limit=25):
     )
 
 async def get_kit_by_id(con, kit_id: int):
-    return await con.fetchrow("select id, name from shop_kit where id=%1, kit_id)
+    return await con.fetchrow("select id, name from shop_kit where id=%1, kit_id")
 
 async def create_shop_item_kit(con, kit_id: int, name: str, price: int, quantity: int, buy_limit: Optional[int]):
     await con.execute(
