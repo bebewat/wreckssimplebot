@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS `shop_item` (
   `quantity` INT UNSIGNED NOT NULL DEFAULT 1,
   `quality` INT UNSIGNED NULL,
   `is_blueprint` BOOLEAN DEFAULT FALSE,
+  `kind` ENUM('single','kit') NOT NULL DEFAULT 'single',
+  `kit_id` INT UNSIGNED NULL,
   `buy_limit` INT UNSIGNED NULL,
   `active` BOOLEAN DEFAULT TRUE,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -54,11 +56,16 @@ CREATE TABLE IF NOT EXISTS `shop_item` (
   KEY `idx_shop_item_active` (`active`),
   KEY `idx_shop_item_category` (`category_id`),
   KEY `idx_shop_item_library` (`library_id`),
+  KEY `idx_shop_item_kind` (`kind`),
+  KEY `idx_shop_item_kit` (`kit_id`),
   CONSTRAINT `fk_shop_item_category`
     FOREIGN KEY (`category_id`) REFERENCES `shop_category`(`id`)
     ON DELETE SET NULL,
   CONSTRAINT `fk_shop_item_library`
     FOREIGN KEY (`library_id`) REFERENCES `shop_item_library`(`id`)
+    ON DELETE SET NULL
+  CONSTRAINT `fk_shop_item_kit`
+    FOREIGN KEY (`kit_id`) REFERENCES `shop_kit`(`id`)
     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
