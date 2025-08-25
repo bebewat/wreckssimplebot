@@ -59,7 +59,7 @@ class ShopCog(commands.Cog):
   @app_commands.describe(name="Item name to remove")
   @is_shop_admin()
   async def shop_remove(self, interaction: discord.Interaction, name: str):
-  async with self.pool.acquire() as con:
+    async with self.pool.acquire() as con:
     row = await con.fetchrow("Delete from shop_item where name=$1 returning name", name)
     if row: await interaction.response.send_message(f" Removed **{row['name']}**.", ephemeral=True)
 
