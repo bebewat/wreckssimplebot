@@ -1,8 +1,10 @@
-# db.py
-import os, asyncpg, json, csv
-from typing import Iterable, Optional
+import os
+from urllib.parse import urlparse, unquote
+from typing import Optional, Iterable, List, Dict, Any
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+import aiomysql
+
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 async def get_pool():
     return await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
@@ -116,70 +118,163 @@ async def init_db(pool):
     async with pool.acquire() as con:
         await con.execute(SCHEMA_SQL)
 
-async def upsert_category(con, name: str) -> int:
-    row = await con.fetchrow(
-        """insert into shop_category(name)
-           values($1)
-           on conflict(name) do update set name=excluded.name
-           returning id""",
-        name.strip()
-    )
-    return row["id"]
+async def upsert_category(conn: aiomysql.Connection, name: str) -> int:
+    """
+    Requires UNIQUE KEY on shop_category(name).
+    Returns id whether inserted or exists.
+    """
+    sql = """
+    INSERT INTO shop_category (name)
+    VALUES (%s)
+    ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(sql, (name.strip(),))
+        return cur.lastrowid
 
-async def upsert_library_item(con, category_id: int, name: str, blueprint_path: str | None) -> int:
-    row = await con.fetchrow(
-        """insert into shop_item_library(category_id, name, blueprint_path)
-           values($1,$2,$3)
-           on conflict(category_id, name) do update set blueprint_path=excluded.blueprint_path
-           returning id""",
-        category_id, name.strip(), blueprint_path
-    )
-    return row["id"]
+async def upsert_library_item(
+    conn: aiomysql.Connection,
+    category_id: int,
+    name: str,
+    blueprint_path: Optional[str],
+) -> int:
+    """
+    Requires UNIQUE KEY on shop_item_library(category_id, name).
+    """
+    sql = """
+    INSERT INTO shop_item_library (category_id, name, blueprint_path)
+    VALUES (%s, %s, %s)
+    ON DUPLICATE KEY UPDATE
+        blueprint_path = VALUES(blueprint_path),
+        id = LAST_INSERT_ID(id)
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(sql, (category_id, name.strip(), blueprint_path))
+        return cur.lastrowid
 
-async def create_shop_item(con, lib_id: int, category_id: int, name: str, blueprint_path: str | None,
-                           price: int, quantity: int, quality: int | None, is_blueprint: bool, buy_limit: int | None):
-    await con.execute(
-        """insert into shop_item(library_id, category_id, name, blueprint_path, price, quantity, quality, is_blueprint, buy_limit)
-           values($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
-        lib_id, category_id, name, blueprint_path, price, quantity, quality, is_blueprint, buy_limit
-    )
+async def find_item_library(conn: aiomysql.Connection, library_id: int) -> Optional[Dict[str, Any]]:
+    sql = "SELECT * FROM shop_item_library WHERE id = %s"
+    async with conn.cursor() as cur:
+        await cur.execute(sql, (library_id,))
+        return await cur.fetchone()
 
-async def search_categories(con, q: str, limit=25):
-    return await con.fetch(
-        "select id, name from shop_category where name ilike $1 order by name limit $2",
-        f"%{q}%", limit
-    )
+async def list_items_by_category(
+    conn: aiomysql.Connection,
+    category_id: int,
+    limit: int = 25,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    sql = """
+    SELECT id, name
+    FROM shop_item_library
+    WHERE category_id = %s
+    ORDER BY name
+    LIMIT %s OFFSET %s
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(sql, (category_id, int(limit), int(offset)))
+        return await cur.fetchall()
 
-async def list_items_by_category(con, category_id: int, limit=25, offset=0):
-    return await con.fetch(
-        """select id, name from shop_item_library
-           where category_id=$1
-           order by name limit $2 offset $3""",
-        category_id, limit, offset
-    )
+async def search_categories(
+    conn: aiomysql.Connection,
+    q: str,
+    limit: int = 25,
+) -> List[Dict[str, Any]]:
+    sql = """
+    SELECT id, name
+    FROM shop_category
+    WHERE name LIKE %s
+    ORDER BY name
+    LIMIT %s
+    """
+    pattern = f"%{q}%"
+    async with conn.cursor() as cur:
+        await cur.execute(sql, (pattern, int(limit)))
+        return await cur.fetchall()
 
-async def find_item_library(con, category_id: int, name: str):
-    return await con.fetchrow(
-        "select * from shop_item_library where category_id=$1 and name=$2",
-        category_id, name
-    )
+async def autocomplete_items(
+    conn: aiomysql.Connection,
+    q: str,
+    limit: int = 25,
+) -> List[Dict[str, Any]]:
+    sql = """
+    SELECT sil.id, sc.name AS category, sil.name
+    FROM shop_item_library sil
+    JOIN shop_category sc ON sc.id = sil.category_id
+    WHERE sil.name LIKE %s
+    ORDER BY sil.name
+    LIMIT %s
+    """
+    pattern = f"%{q}%"
+    async with conn.cursor() as cur:
+        await cur.execute(sql, (pattern, int(limit)))
+        return await cur.fetchall()
 
-async def autocomplete_items(con, q: str, limit=25):
-    return await con.fetch(
-        """select sil.id, sc.name as category, sil.name
-           from shop_item_library sil
-           join shop_category sc on sc.id = sil.category_id
-           where sil.name ilike $1
-           order by sil.name limit $2""",
-        f"%{q}%", limit
-    )
+async def create_shop_item(
+    conn: aiomysql.Connection,
+    library_id: int,
+    category_id: int,
+    name: str,
+    blueprint_path: Optional[str],
+    price: int,
+    quantity: int,
+    quality: Optional[int],
+    is_blueprint: bool,
+    buy_limit: Optional[int],
+) -> None:
+    """
+    Inserts a live shop item representing a single library item.
+    Assumes shop_item has columns:
+      kind ENUM('single','kit') DEFAULT 'single'
+    """
+    sql = """
+    INSERT INTO shop_item
+      (kind, library_id, category_id, name, blueprint_path, price, quantity, quality, is_blueprint, buy_limit, active)
+    VALUES
+      ('single', %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            sql,
+            (
+                library_id,
+                category_id,
+                name,
+                blueprint_path,
+                int(price),
+                int(quantity),
+                (int(quality) if quality is not None else None),
+                1 if is_blueprint else 0,
+                (int(buy_limit) if buy_limit is not None else None),
+            ),
+        )
 
-async def get_kit_by_id(con, kit_id: int):
-    return await con.fetchrow("select id, name from shop_kit where id=%1, kit_id")
 
-async def create_shop_item_kit(con, kit_id: int, name: str, price: int, quantity: int, buy_limit: Optional[int]):
-    await con.execute(
-        """insert into shop_item(kind, kit_id, name, price, quantity, buy_limit, active)
-            values('kit', %1, %2, %3, %4, %5, true)""",
-        kit_id, name, price, quantity, buy_limit
-    )
+async def get_kit_by_id(conn: aiomysql.Connection, kit_id: int) -> Optional[Dict[str, Any]]:
+    sql = "SELECT id, name FROM shop_kit WHERE id = %s"
+    async with conn.cursor() as cur:
+        await cur.execute(sql, (kit_id,))
+        return await cur.fetchone()
+
+async def create_shop_item_kit(
+    conn: aiomysql.Connection,
+    kit_id: int,
+    name: str,
+    price: int,
+    quantity: int,
+    buy_limit: Optional[int],
+) -> None:
+    """
+    Inserts a live shop item representing a kit.
+    """
+    sql = """
+    INSERT INTO shop_item
+      (kind, kit_id, name, price, quantity, buy_limit, active)
+    VALUES
+      ('kit', %s, %s, %s, %s, %s, TRUE)
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            sql,
+            (kit_id, name, int(price), int(quantity), (int(buy_limit) if buy_limit is not None else None)),
+        )
