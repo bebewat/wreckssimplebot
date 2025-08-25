@@ -119,7 +119,7 @@ class ConfigModal(Modal):
                 msg = f"✅ Added **{name}** to the shop (price {price}, qty {qty})."
 
         else:  
-                kit = await get_kit_by_id(con, v.selected_kit_id)
+                kit = await list_kits(con)
                 if not kit:
                     await interaction.response.edit_message(content="Kit not found.", view=None)
                     return
