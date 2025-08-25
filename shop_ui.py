@@ -1,3 +1,5 @@
+import json
+from dotenv import load_dotenv
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -5,14 +7,31 @@ from discord.ui import View, Select, Button, Modal, TextInput
 
 from db import get_pool, list_items_by_category, search_categories, find_item_library, create_shop_item
 
-ADMIN_ROLE = "Shop Admin"  
+load_dotenv()
+
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", 0))
+SHOP_CHANNEL = int(os.getenv("SHOP_CHANNEL", 0))
+REWARD_INTERVAL_MINUTES = int(os.getenv("REWARD_INTERVAL_MINUTES", 30))
+REWARD_POINTS = int(os.getenv("REWARD_POINTS", 10))
+
+ADMIN_ROLE_PATH = Path(__file__).parent / 'admin_roles.json'
+DISCOUNTS_PATH = Path(__file__).parent / 'discounts.json'
+
+admin_roles = json.loads(ADMIN_ROLE_PATH.read_text()) if ADMIN_ROLE_PATH.exists() else []
+discounts = json.loads(DISCOUNTS_PATH.read_text()) if DISCOUNTS_PATH.exists() else []
 
 def is_shop_admin():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        if interaction.user.guild_permissions.administrator:
-            return True
-        return any(r.name == ADMIN_ROLE for r in interaction.user.roles)
-    return app_commands.check(predicate)
+    return any(r['id'] == str(user_id) for r in admin_roles)
+
+def apply_discounts(user_roles, base_price, current_event=None):
+    price = base_price
+    for d in discounts:
+        if d['type'] == 'role' and d['target'] in user_roles:
+            price = price * (1 - d['amount']/100)
+        if d['type'] == 'event' and d['target'] == current_event:
+            price = price * (1 - d['amount']/100)
+    return int(price)
 
 class CategorySelect(Select):
     def __init__(self, categories):
