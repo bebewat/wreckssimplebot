@@ -213,3 +213,9 @@ async def create_shop_item_kit(
             sql,
             (kit_id, name, int(price), int(quantity), (int(buy_limit) if buy_limit is not None else None)),
         )
+
+async def list_kits(conn):
+    sql = "SELECT id, name FROM shop_kit WHERE active=1 ORDER BY name LIMIT 25"
+    async with conn.cursor() as cur:
+        await cur.execute(sql)
+        return await cur.fetchall()
