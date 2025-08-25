@@ -1,0 +1,12 @@
+[
+  {
+    "id": "237409723472",
+    "name": "Shop Admin",
+    "desc": "Access to add/remove items"
+  },
+  {
+    "id": "0707503074503",
+    "name": "Shop Owner",
+    "desc": "Full access to all functions"
+  }
+]
